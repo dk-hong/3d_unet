@@ -32,9 +32,9 @@ except ModuleNotFoundError:
 #     print('dali is not installed')
 
 from unet import UNet
-from loss import per_channel_dice_loss
 from loss import dice_loss
 from meters import *
+from custom_transforms import *
 
 from dataset_from_np import CustomDataset
 
@@ -189,20 +189,17 @@ def main_worker(gpu, ngpus_per_node, args):
         train_loader = DALIClassificationIterator(pipe, reader_name="Reader", fill_last_batch=False)
 
     else:
-        # transform = tio.transforms.Compose([tio.RandomFlip(axes=('LR')),
-        #                             tio.RandomAffine(scales=(0.9, 1.2), degrees=10, isotropic=True, image_interpolation='nearest',),
-        #                             tio.RandomBiasField(), tio.CropOrPad(112)])
-        # train_dataset = custom_subject('./train_iter', transform)
-        train_dataset = VoxelFolder('./source/p2/front', 112, 14)
-        test_dataset = VoxelFolder('./source/p7/front', 112, 14)
+        # A
+        train_dataset = VoxelFolder('./source/p2/', 224, 112, transform=Compose([ToTensor(), Resize(112), RandomHorizontalFlip()]))
+        test_dataset = VoxelFolder('./source/p7/', 224, 112, transform=Compose([ToTensor(), Resize(112)]))
+        
+        # B
+        # dataset is from pt
+        # transform=Compose([Resize(112), RandomHorizontalFlip()])
 
-        # train_dataset = CustomDataset('./train_iter')
-        # transform = tio.transforms.Compose([
-            # tio.transforms.RandomFlip(axes=('Height', 'Width')),
-            # tio.transforms.RandomAffine(scales=(0.9, 1.1), isotropic=True, image_interpolation='nearest'),
-            # tio.transforms.CropOrPad((112, 112, 112))
-        # ])
-        # subjects_dataset = tio.SubjectsDataset(train_dataset, transform=transform)
+        # C
+        # dataset is from pt, already size 112
+        # transform=Compose([RandomHorizontalFlip()])
 
 
         if args.use_horovod:
