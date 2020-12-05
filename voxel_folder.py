@@ -1,27 +1,17 @@
 import os
+import math
 import numpy as np
 
-from torch.utils.data import Dataset
-
-from torchvision.datasets.vision import VisionDataset
 from matplotlib import image
 
-
-# Setting
-# 
-
-# TODO:
-# 1. normalize: input은 255로 나누고, label은 0 or 1이 되도록
-# 2. p2를 train set으로, p7을 test set으로 사용하도록
-# 3. Flip은 항상 CPU에서
-# 4. CPU에서 Crop & Resize 후 훈련, Crop한 데이터를 불러와서 Resize 후 훈련, Crop & Resize한 데이터를 불러와서 훈련 세 가지를 테스트 할 것
+from torch.utils.data import Dataset
 
 
 class VoxelFolder(Dataset):
     def __init__(self, path:str, input_size, overlap_size, transform=None):
         super(VoxelFolder, self).__init__()
         # path shoud be 'p*/'
-        self.angle = ['front', 'right', 'top']
+        self.angle = ['front']#, 'right', 'top']
         self.input_files, self.label_files, self.D = self._find_files(path)
         self.transform = transform
 
@@ -61,9 +51,7 @@ class VoxelFolder(Dataset):
         self.num_voxel_per_height = []
         self.num_voxel_per_width = []
         self.total_voxel_num_per_angle = []
-        self.total_voxel_num = 1
-
-
+        self.total_voxel_num = 0
 
         # file과 H, W의 index를 저장 후 get_item시에 해당 index의 파일을 직접 열어서
         for D, H, W in zip(self.D, self.H, self.W):
@@ -76,7 +64,7 @@ class VoxelFolder(Dataset):
             self.num_voxel_per_width.append(num_voxel_per_width)
             
             self.total_voxel_num_per_angle.append(num_voxel_per_depth * num_voxel_per_height * num_voxel_per_width)
-            self.total_voxel_num *= self.total_voxel_num_per_angle[-1]
+            self.total_voxel_num += self.total_voxel_num_per_angle[-1]
  
     def _find_files(self, path):
         input_files = []
@@ -92,10 +80,7 @@ class VoxelFolder(Dataset):
         return input_files, label_files, D
     
     def _get_num_voxel_per(self, base, input_size, overlap_size):
-        if (base - input_size) % (input_size - overlap_size) == 0:
-            return (base - input_size) // (input_size - overlap_size) + 1
-        else:
-            return (base - input_size) // (input_size - overlap_size) + 2
+        return math.ceil((base - input_size) / (input_size - overlap_size)) + 1
 
     def __len__(self):
         return self.total_voxel_num

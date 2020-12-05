@@ -4,7 +4,6 @@ import time
 import argparse
 
 import torch
-import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
@@ -12,12 +11,9 @@ import torch.optim
 import torch.multiprocessing as mp
 import torch.utils.data
 import torch.utils.data.distributed
-import torchvision.transforms as transforms
 
 from torch.utils.data import DataLoader
-# 1import torchio as tio
 
-# from tio_dataset import custom_subject
 from voxel_folder import VoxelFolder
 
 try:
@@ -25,18 +21,12 @@ try:
 except ModuleNotFoundError:
     print('horovod is not installed')
 
-# try:
-#     from nvidia.dali.plugin.pytorch import DALIClassificationIterator
-#     from dali import HybridTrainPipe, HybridValPipe
-# except ModuleNotFoundError:
-#     print('dali is not installed')
-
 from unet import UNet
 from loss import dice_loss
 from meters import *
 from custom_transforms import *
 
-from dataset_from_np import CustomDataset
+from dataset_from_pt import CustomDataset
 
 ## DDP
 # python -m torch.distributed.launch --nproc_per_node=1 train_3dunet.py --multiprocessing-distributed
@@ -76,7 +66,7 @@ def parse_args():
     parser.add_argument('--use-horovod', default=False, action='store_true', help='use horovod')
     parser.add_argument('--fp16-allreduce', default=False, action='store_true', help='use horovod gradient compression')
     
-    parser.add_argument('--use-dali', default=False, action='store_true', help='use dali')
+    parser.add_argument('--method', default='A', choices=['A', 'B', 'C'], help='choice which dataset is used')
 
     return parser.parse_args()
 
@@ -170,67 +160,47 @@ def main_worker(gpu, ngpus_per_node, args):
     mixed_precision = args.mixed_precision
     scaler = torch.cuda.amp.GradScaler(enabled=mixed_precision)
 
-    if args.use_dali:
-        if args.use_horovod:
-            args.local_rank = hvd.local_rank()
-            args.world_size = hvd.size()
-            device_id = args.local_rank
-        else:
-            device_id = gpu
-        
-        pipe = HybridTrainPipe(batch_size=args.batch_size,
-                               num_threads=args.n_workers,
-                               device_id=device_id,
-                               data_dir='./train_iter',
-                               dali_cpu=False,
-                               shard_id=args.local_rank,
-                               num_shards=args.world_size)
-        pipe.build()
-        train_loader = DALIClassificationIterator(pipe, reader_name="Reader", fill_last_batch=False)
-
-    else:
+    if args.method == 'A':
         # A
+        print('not preprocess')
         train_dataset = VoxelFolder('./source/p2/', 224, 112, transform=Compose([ToTensor(), Resize(112), RandomHorizontalFlip()]))
-        test_dataset = VoxelFolder('./source/p7/', 224, 112, transform=Compose([ToTensor(), Resize(112)]))
-        
+        # test_dataset = VoxelFolder('./source/p7/', 224, 112, transform=Compose([ToTensor(), Resize(112)]))
+    elif args.method == 'B':
         # B
         # dataset is from pt
-        # transform=Compose([Resize(112), RandomHorizontalFlip()])
+        print('already resized')
+        train_dataset = CustomDataset('./before_resized/train', transform=Compose([Resize(112), RandomHorizontalFlip()]))
 
+    elif args.method == 'C':
         # C
         # dataset is from pt, already size 112
-        # transform=Compose([RandomHorizontalFlip()])
+        print('already resized and croped')
+        train_dataset = CustomDataset('./after_resized/test', transform=Compose([RandomHorizontalFlip()]))
 
-
-        if args.use_horovod:
-            train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset,
-                                                                            num_replicas=hvd.size(),
-                                                                            rank=hvd.rank())
-        elif args.distributed:
-            train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-        else:
-            train_sampler = None
-        
-        train_loader = DataLoader(
-            train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-            num_workers=args.n_workers, pin_memory=True, sampler=train_sampler
-        )
-        test_loader = DataLoader(
-            test_dataset, batch_size=args.batch_size, shuffle=False,
-            num_workers=args.n_workers, pin_memory=True
-        )
+    if args.use_horovod:
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset,
+                                                                        num_replicas=hvd.size(),
+                                                                        rank=hvd.rank())
+    elif args.distributed:
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    else:
+        train_sampler = None
+    
+    train_loader = DataLoader(
+        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+        num_workers=args.n_workers, pin_memory=True, sampler=train_sampler
+    )
+    # test_loader = DataLoader(
+    #     test_dataset, batch_size=args.batch_size, shuffle=False,
+    #     num_workers=args.n_workers, pin_memory=True
+    # )
 
     for epoch in range(args.epochs):
-        if not args.use_dali and args.distributed:
-            train_sampler.set_epoch(epoch)
         
         batch_time = AverageMeter('Time', ':6.3f')
         data_time = AverageMeter('Data', ':6.3f')
         losses = AverageMeter('Loss', ':.4e')
-        if args.use_dali:
-            len_train_loader = int(math.ceil(train_loader._size / args.batch_size))
-        else:
-            len_train_loader = len(train_loader)
+        len_train_loader = len(train_loader)
 
         progress = ProgressMeter(
             len_train_loader,
@@ -242,12 +212,7 @@ def main_worker(gpu, ngpus_per_node, args):
         end = time.time()
         start = time.time()
         for i, data in enumerate(train_loader):
-            if args.use_dali:
-                images = data[0]["data"]
-                targets = data[0]["label"].squeeze().cuda().long()
-            else:
-                images, targets = data
-                # images, targets = data['data']['data'], data['label']['data']
+            images, targets = data
             
             # measure data loading time
             data_time.update(time.time() - end)
@@ -284,8 +249,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
             if i % 10 == 0:
                 progress.display(i)
-        if args.use_dali:
-            train_loader.reset()
+
         
         # # check loss and decay
         # if scheduler:
@@ -294,10 +258,7 @@ def main_worker(gpu, ngpus_per_node, args):
         # batch_time = AverageMeter('Time', ':6.3f')
         # data_time = AverageMeter('Data', ':6.3f')
         # losses = AverageMeter('Loss', ':.4e')
-        # if args.use_dali:
-        #     len_test_loader = int(math.ceil(test_loader._size / args.batch_size))
-        # else:
-        #     len_test_loader = len(test_loader)
+        # len_test_loader = len(test_loader)
 
         # progress = ProgressMeter(
         #     len_test_loader,
@@ -309,12 +270,7 @@ def main_worker(gpu, ngpus_per_node, args):
         # end = time.time()
         # start = time.time()
         # for i, data in enumerate(test_loader):
-        #     if args.use_dali:
-        #         images = data[0]["data"]
-        #         targets = data[0]["label"].squeeze().cuda().long()
-        #     else:
-        #         images, targets = data
-        #         # images, targets = data['data']['data'], data['label']['data']
+        #     images, targets = data
             
         #     # measure data loading time
         #     data_time.update(time.time() - end)
@@ -342,10 +298,6 @@ def main_worker(gpu, ngpus_per_node, args):
         #             pass
         #         else:
         #             progress.display(i)
-        # if args.use_dali:
-        #     train_loader.reset()
-        
-        
 
 
 if __name__ == '__main__':

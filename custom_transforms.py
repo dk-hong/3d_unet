@@ -49,40 +49,6 @@ class Resize(object):
 
         return image
 
-'''
-class Resize(object):
-    def __init__(self, output_size):
-        assert isinstance(output_size, (int, tuple))
-        self.output_size = output_size
-    
-    def __call__(self, image, label=False):
-        b, c, d, h, w = image.shape
-        if isinstance(self.output_size, int):
-            new_d, new_h, new_w = self.output_size, self.output_size, self.output_size
-        else:
-            new_d, new_h, new_h = self.output_size
-
-        image = image.reshape(b * c, d, h, w)
-
-        resize = transforms.Resize(new_h, new_w)
-        image = resize(image)
-        # label = resize(label)
-
-        image = torch.transpose(image, 2, 4)
-        # label = torch.transpose(label, 2, 4)
-
-        resize = transforms.Resize(new_h, new_d)
-        image = resize(image)
-        # label = resize(label)
-
-        image = torch.transpose(image, 2, 4)
-        # label = torch.transpose(label, 2, 4)
-
-        image = image.reshape(b, c, new_d, new_h, new_w)
-
-        return image
-
-'''
 
 class RandomCrop(object):
     def __init__(self, output_size):
@@ -118,60 +84,6 @@ class RandomCrop(object):
                         self.w_idx: self.w_idx + new_w]
 
         return image
-
-
-'''
-class RandomCrop(object):
-    """Crop randomly the image in a sample.
-
-    Args:
-        output_size (tuple or int): Desired output size. If int, square crop
-            is made.
-    """
-
-    def __init__(self, output_size):
-        assert isinstance(output_size, (int, tuple))
-        if isinstance(output_size, int):
-            self.output_size = (output_size, output_size, output_size)
-        else:
-            assert len(output_size) == 3
-            self.output_size = output_size
-
-    def __call__(self, image, label=False):
-        d, h, w = image.shape[:3]
-        new_d, new_h, new_w = self.output_size
-
-        tmp_image = []
-
-        if not label:
-            self.d_index_list = []
-            self.h_index_list = []
-            self.w_index_list = []
-            for i in range(image.shape[0]):
-                d_idx = np.random.randint(0, d - new_d)
-                self.d_index_list.append(d_idx)
-                h_idx = np.random.randint(0, h - new_h)
-                self.h_index_list.append(h_idx)
-                w_idx = np.random.randint(0, w - new_w)
-                self.w_index_list.append(w_idx)
-
-                tmp_image.append(image[i, :, d_idx: d_idx + new_d,
-                                h_idx: h_idx + new_h,
-                                w_idx: w_idx + new_w])
-
-        else:
-            for i, d_idx, h_idx, w_idx in zip(range(image.shape[0]), self.d_index_list, self.h_index_list, self.w_index_list):
-                tmp_image.append(image[i, :, d_idx: d_idx + new_d,
-                                h_idx: h_idx + new_h,
-                                w_idx: w_idx + new_w])
-
-        image = torch.cat(tmp_image, axis=0)
-
-        return image
-
-'''
-
-# normalize, ToTensor 한 것 저장, 불러와서 normalize, ToTensor 후 dataloader에
 
 
 class RandomAffineWithLabel(transforms.RandomAffine):
