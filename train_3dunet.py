@@ -1,5 +1,4 @@
 import os
-import math
 import time
 import argparse
 
@@ -14,7 +13,7 @@ import torch.utils.data.distributed
 
 from torch.utils.data import DataLoader
 
-from voxel_folder import VoxelFolder
+from unet_folder import UnetFolder
 
 try:
     import horovod.torch as hvd
@@ -22,20 +21,23 @@ except ModuleNotFoundError:
     print('horovod is not installed')
 
 from unet import UNet
-from loss import dice_loss
-from meters import *
-from custom_transforms import *
+from utils.loss import dice_loss
+from utils.meters import *
+import custom_transforms
 
-from dataset_from_pt import CustomDataset
+from dataset_from_pt import *
 
 ## DDP
 # python -m torch.distributed.launch --nproc_per_node=1 train_3dunet.py --multiprocessing-distributed
 ## horovod
-# horovodrun -np 4 python train_3dunet.py --use-horovod |& grep -v "Read -1"
+# horovodrun -np 4 python train_3dunet.py --use-horovod
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--train-data', default='/data/3d/p2', help='path to train dataset')
+    parser.add_argument('--test-data', default='/data/3d/p7', help='path to test dataset')
+
     parser.add_argument("--up-sample", help="Use ConvTranspose3d layer as up_layer", action='store_true')
     parser.add_argument("--n-workers", help="The number of data loading workers (default: 4)", type=int, default=4)
     parser.add_argument('--epochs', default=400, type=int, metavar='N', help='number of total epochs to run')
@@ -71,7 +73,6 @@ def parse_args():
     return parser.parse_args()
 
 
-best_acc1 = 0
 os.environ['MASTER_ADDR'] = '127.0.0.1'
 os.environ['MASTER_PORT'] = '29500'
 
@@ -95,7 +96,6 @@ def main():
 
 
 def main_worker(gpu, ngpus_per_node, args):
-    global best_acc1
     args.gpu = gpu
 
     if args.gpu is not None:
@@ -163,19 +163,27 @@ def main_worker(gpu, ngpus_per_node, args):
     if args.method == 'A':
         # A
         print('not preprocess')
-        train_dataset = VoxelFolder('./source/p2/', 224, 112, transform=Compose([ToTensor(), Resize(112), RandomHorizontalFlip()]))
-        # test_dataset = VoxelFolder('./source/p7/', 224, 112, transform=Compose([ToTensor(), Resize(112)]))
+        train_dataset = UnetFolder(args.train_data, 224, 112, transform=custom_transforms.Compose([
+                                                                            custom_transforms.ToTensor(),
+                                                                            custom_transforms.Resize(112),
+                                                                            custom_transforms.RandomHorizontalFlip()
+                                                                        ]))
+        # train_dataset = UnetFolder('./source/p2/', 224, 112, transform=Compose([ToTensor(), Resize(112), RandomHorizontalFlip()]))
+        # test_dataset = UnetFolder('./source/p7/', 224, 112, transform=Compose([ToTensor(), Resize(112)]))
     elif args.method == 'B':
         # B
-        # dataset is from pt
-        print('already resized')
-        train_dataset = CustomDataset('./before_resized/train', transform=Compose([Resize(112), RandomHorizontalFlip()]))
-
+        # dataset is from pt, read each time
+        print('already resized and croped')
+        train_dataset = TensorDataset(args.train_data, transform=custom_transforms.Compose([custom_transforms.Resize(112), custom_transforms.RandomHorizontalFlip()]))
+        # train_dataset = TensorDataset('./before_resized/train', transform=Compose([Resize(112), RandomHorizontalFlip()]))
+        # test_dataset = TensorDataset('./before_resized/train', transform=Compose([Resize(112)]))
     elif args.method == 'C':
         # C
-        # dataset is from pt, already size 112
+        # dataset is from pt, already size 112, read each time
         print('already resized and croped')
-        train_dataset = CustomDataset('./after_resized/test', transform=Compose([RandomHorizontalFlip()]))
+        train_dataset = TensorDataset(args.train_data, transform=custom_transforms.Compose([custom_transforms.RandomHorizontalFlip()]))
+        # train_dataset = TensorDataset('./after_resized/train', transform=Compose([RandomHorizontalFlip()]))
+        # test_dataset = TensorDataset('./after_resized/train')
 
     if args.use_horovod:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset,
@@ -200,10 +208,9 @@ def main_worker(gpu, ngpus_per_node, args):
         batch_time = AverageMeter('Time', ':6.3f')
         data_time = AverageMeter('Data', ':6.3f')
         losses = AverageMeter('Loss', ':.4e')
-        len_train_loader = len(train_loader)
 
         progress = ProgressMeter(
-            len_train_loader,
+            len(train_loader),
             batch_time, data_time, losses,
             prefix="Epoch: [{}]".format(epoch + 1))
         
@@ -249,19 +256,17 @@ def main_worker(gpu, ngpus_per_node, args):
 
             if i % 10 == 0:
                 progress.display(i)
-
         
         # # check loss and decay
-        # if scheduler:
-        #     scheduler.step(losses.avg)
+        if scheduler:
+            scheduler.step(losses.avg)
        
         # batch_time = AverageMeter('Time', ':6.3f')
         # data_time = AverageMeter('Data', ':6.3f')
         # losses = AverageMeter('Loss', ':.4e')
-        # len_test_loader = len(test_loader)
 
         # progress = ProgressMeter(
-        #     len_test_loader,
+        #     len(test_loader),
         #     batch_time, data_time, losses,
         #     prefix="Epoch: [{}]".format(epoch + 1))
         

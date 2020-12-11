@@ -1,9 +1,32 @@
 import os
 import math
+import argparse
 import torch
 
 import numpy as np
 from tqdm import tqdm
+from matplotlib import image
+
+from custom_transforms import Resize
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    # 원본 이미지 위치
+    parser.add_argument('--source', type=str, default='./3d_data/p2')
+    # 저장할 위치
+    parser.add_argument('--dir', type=str, default='./3d_data')
+    # task
+    parser.add_argument('--task', type=str, default='train')
+
+    # patch size
+    parser.add_argument('--patch-size', type=int, default=224)
+    # overlap size
+    parser.add_argument('--overlap-size', type=int, default=112)
+    # resize
+    parser.add_argument('--resize_ratio', type=int, default=0.5)
+
+    return parser.parse_args()
 
 
 def calc_patch_coord(tensor_shape, patch_size=(224, 224, 224), overlap=(112, 112, 112)):
@@ -34,49 +57,69 @@ def calc_patch_coord(tensor_shape, patch_size=(224, 224, 224), overlap=(112, 112
     return return_coord
 
 
-PATCH_SIZE = (224, 224, 224)
-OVERLAP_SIZE = (112, 112, 112)
-DATA_PATH = './before_resized'
+def main():
+    args = parse_args()
 
+    if args.resize_ratio == 1:
+        PATCH_SIZE = (args.patch_size, ) * 3
+        OVERLAP_SIZE = (args.overlap_size, ) * 3
+    else:
+        PATCH_SIZE = (math.ceil(args.patch_size * args.resize_ratio), ) * 3
+        OVERLAP_SIZE = (math.ceil(args.overlap_size * args.resize_ratio), ) * 3
 
-directories = ['p2', 'p7']
-positions = ['front']#, 'right', 'top']
+    
+    os.makedirs(os.path.join(args.dir, f'{args.task}'), exist_ok=True)
+    
+    angles = ['front']#, 'right', 'top']
 
-for directory in directories:
-    for position in positions:
-        if directory == 'p2':
-            task = 'train'
-        elif directory == 'p7':
-            task = 'test'
-        else:
-            print('wrong position')
-            exit()
-
-        tensor_data = torch.load(f'./merged_data/{task}/{directory}_{position}.pt')
-        tensor_target = torch.load(f'./merged_data/{task}/{directory}_{position}_label.pt')
-
-        tensor_data = tensor_data.numpy()
-        tensor_target = tensor_target.numpy()
-
+    x = 0
+    
+    for angle in angles:
+        dir = os.path.join(args.source, angle)
+        input_files = [os.path.join(dir, d.name) for d in os.scandir(dir) if d.is_file()]
+        label_files = [os.path.join(dir, 'label', d.name) for d in os.scandir(os.path.join(dir, 'label')) if d.is_file()]
+        input_3d = []
+        label_3d = []
+        for i in input_files:
+            # scaling and append
+            input_3d.append(image.imread(i).astype(np.float32) / 255)
         
-        x = 0
+        for i in label_files:
+            label = image.imread(i)
+            if len(label.shape) > 2:
+                label = label[:, :, 0]
 
-        patch_coord = calc_patch_coord(tensor_data.shape, PATCH_SIZE, OVERLAP_SIZE)
-
+            label_3d.append((label > 0).astype(np.float32))
         
+        input_3d = np.array(input_3d)
+        label_3d = np.array(label_3d)
+
+        if args.resize_ratio != 1:
+            d, h, w = input_3d.shape
+            new_d, new_h, new_w = math.ceil(d / 2), math.ceil(h / 2), math.ceil(w / 2)
+            input_3d = torch.from_numpy(input_3d)
+            label_3d = torch.from_numpy(label_3d)
+            resize = Resize((new_d, new_h, new_w))
+            input_3d = resize(input_3d)
+            label_3d = resize(label_3d, label=False)
+            input_3d, label_3d = input_3d.numpy(), label_3d.numpy()
+
+
+        patch_coord = calc_patch_coord(input_3d.shape, PATCH_SIZE, OVERLAP_SIZE)
+
         for i, patch_coord in tqdm(enumerate(patch_coord)):
-            data_slice = tensor_data[patch_coord[0]: patch_coord[1],\
+            data_slice = input_3d[patch_coord[0]: patch_coord[1],\
+                                patch_coord[2]: patch_coord[3],\
+                                patch_coord[4]: patch_coord[5]]
+
+            target_slice = label_3d[patch_coord[0]: patch_coord[1],\
                                     patch_coord[2]: patch_coord[3],\
                                     patch_coord[4]: patch_coord[5]]
-
-            target_slice = tensor_target[patch_coord[0]: patch_coord[1],\
-                                        patch_coord[2]: patch_coord[3],\
-                                        patch_coord[4]: patch_coord[5]]
-
             
-            np.save(os.path.join(DATA_PATH + f'/{task}/{i + x:04}'), [data_slice, target_slice])
+            np.save(os.path.join(args.dir, f'{args.task}/{i + x:04}'), [data_slice, target_slice])
             
-            # torch.save([data_slice, target_slice], os.path.join(DATA_PATH + f'/{task}/{i + x:04}.pt'))
-            # torch.save(target_slice, os.path.join(DATA_PATH + f'/{task}/label_{i + x:04}.pt'))
-
         x += i
+
+
+if __name__ == '__main__':
+    main()

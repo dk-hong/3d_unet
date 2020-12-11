@@ -12,7 +12,6 @@ class RandomHorizontalFlip(torch.nn.Module):
         self.p = p
 
     def forward(self, img, label=False):
-        img_size = img.shape
         if not label:
             self.current_p = torch.rand(1)
 
