@@ -35,8 +35,8 @@ from dataset_from_pt import *
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train-data', default='/data/3d/p2', help='path to train dataset')
-    parser.add_argument('--test-data', default='/data/3d/p7', help='path to test dataset')
+    parser.add_argument('--train-data', default='/data/3d_data/p2', help='path to train dataset')
+    parser.add_argument('--test-data', default='/data/3d_data/p7', help='path to test dataset')
 
     parser.add_argument("--up-sample", help="Use ConvTranspose3d layer as up_layer", action='store_true')
     parser.add_argument("--n-workers", help="The number of data loading workers (default: 4)", type=int, default=4)
@@ -174,15 +174,23 @@ def main_worker(gpu, ngpus_per_node, args):
         # B
         # dataset is from pt, read each time
         print('already resized and croped')
-        train_dataset = TensorDataset(args.train_data, transform=custom_transforms.Compose([custom_transforms.Resize(112), custom_transforms.RandomHorizontalFlip()]))
+        train_dataset = TensorDataset(args.train_data, transform=custom_transforms.Compose([
+                                                                    custom_transforms.ToTensor(),
+                                                                    custom_transforms.Resize(112),
+                                                                    custom_transforms.RandomHorizontalFlip()
+                                                                    ]))
         # train_dataset = TensorDataset('./before_resized/train', transform=Compose([Resize(112), RandomHorizontalFlip()]))
         # test_dataset = TensorDataset('./before_resized/train', transform=Compose([Resize(112)]))
     elif args.method == 'C':
         # C
         # dataset is from pt, already size 112, read each time
         print('already resized and croped')
-        train_dataset = TensorDataset(args.train_data, transform=custom_transforms.Compose([custom_transforms.RandomHorizontalFlip()]))
-        # train_dataset = TensorDataset('./after_resized/train', transform=Compose([RandomHorizontalFlip()]))
+        train_dataset = TensorDataset(args.train_data, transform=custom_transforms.Compose([
+                                                                    custom_transforms.ToTensor(),
+                                                                    custom_transforms.RandomHorizontalFlip()]))
+        # train_dataset = TensorDataset('./after_resized/train', transform=custom_transforms.Compose([
+        #                                                                   custom_transforms.ToTensor(),
+        #                                                                   custom_transforms.RandomHorizontalFlip()]))
         # test_dataset = TensorDataset('./after_resized/train')
 
     if args.use_horovod:

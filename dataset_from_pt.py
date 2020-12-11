@@ -1,5 +1,6 @@
 import os
 import torch
+import numpy as np
 
 
 class TensorDataset(torch.utils.data.Dataset):
@@ -15,7 +16,7 @@ class TensorDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, idx):
         file_name = self.file_list[idx]
-        image, target = torch.load(os.path.join(self.path, file_name))
+        image, target = np.load(os.path.join(self.path, file_name))
 
         if self.transform:
             image, target = self.transform(image), self.transform(target, label=True)

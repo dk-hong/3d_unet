@@ -13,9 +13,9 @@ from custom_transforms import Resize
 def parse_args():
     parser = argparse.ArgumentParser()
     # 원본 이미지 위치
-    parser.add_argument('--source', type=str, default='./3d_data/p2')
+    parser.add_argument('--source', type=str, default='/data/3d_data/p2')
     # 저장할 위치
-    parser.add_argument('--dir', type=str, default='./3d_data')
+    parser.add_argument('--dir', type=str, default='/data/3d_data')
     # task
     parser.add_argument('--task', type=str, default='train')
 
@@ -24,7 +24,7 @@ def parse_args():
     # overlap size
     parser.add_argument('--overlap-size', type=int, default=112)
     # resize
-    parser.add_argument('--resize_ratio', type=int, default=0.5)
+    parser.add_argument('--resize_ratio', type=int, default=1)
 
     return parser.parse_args()
 
@@ -70,7 +70,7 @@ def main():
     
     os.makedirs(os.path.join(args.dir, f'{args.task}'), exist_ok=True)
     
-    angles = ['front']#, 'right', 'top']
+    angles = ['front', 'right', 'top']
 
     x = 0
     
